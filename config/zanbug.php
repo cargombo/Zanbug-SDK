@@ -26,9 +26,18 @@ return [
 
     /*
      * Validation xətalarını warning olaraq göndər.
-     * Bu, istifadəçilərin göndərdiyi yanlış fieldləri izləmək üçündür.
+     *
+     * DEFOLT SÖNÜLÜDÜR və bunun səbəbi var: Laravel ValidationException-ı öz
+     * $internalDontReport siyahısında saxlayır, yəni o, report() mərhələsində
+     * süzülür və SDK-ya heç vaxt çatmır. Açsan, SDK Laravel-in bu filtrini
+     * ValidationException üçün götürür (stopIgnoring — Laravel 9+).
+     *
+     * Nəticələri:
+     *   - hər uğursuz form göndərişi bir hadisə yaradır, həcm böyük olur
+     *   - xəta Laravel-in öz log-una da düşür (laravel.log şişir)
+     * Ona görə yalnız konkret bir sahəni araşdırarkən müvəqqəti açmaq tövsiyə olunur.
      */
-    'capture_validation' => env('ZANBUG_CAPTURE_VALIDATION', true),
+    'capture_validation' => env('ZANBUG_CAPTURE_VALIDATION', false),
 
     /*
      * Http::get/post/... ilə edilən xarici API çağırışlarında

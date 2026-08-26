@@ -70,6 +70,24 @@ class ZanbugServiceProvider extends ServiceProvider
                 return;
             }
 
+            /**
+             * ValidationException Laravel-in ÖZ $internalDontReport siyahısındadır.
+             *
+             * Handler::report() ən əvvəldə shouldntReport() yoxlayır və oradan
+             * geri qayıdır — reportable callback-lərinə heç vaxt çatmır. Yəni
+             * aşağıdakı $captureValidation yoxlaması stopIgnoring() olmadan
+             * sadəcə ölü koddur.
+             *
+             * stopIgnoring() Laravel 9-dan var; köhnə versiyada bu xüsusiyyət
+             * mümkün deyil, method_exists sakitcə keçir.
+             *
+             * DİQQƏT: bu, xətanı Laravel-in öz log-una da salır (laravel.log),
+             * çünki filtri tamamilə götürür. Ona görə defolt olaraq SÖNÜLÜDÜR.
+             */
+            if ($captureValidation && method_exists($handler, 'stopIgnoring')) {
+                $handler->stopIgnoring('Illuminate\Validation\ValidationException');
+            }
+
             $handler->reportable(function ($e) use ($skipClasses, $captureValidation, $app) {
                 // İstifadəçi tərəfindən söndürülmüş exception sinifləri
                 foreach ($skipClasses as $class) {
