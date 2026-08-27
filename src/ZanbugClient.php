@@ -20,7 +20,7 @@ namespace Zanbug\Laravel;
 class ZanbugClient
 {
     const SDK_NAME    = 'zanbug/laravel';
-    const SDK_VERSION = '1.2.0';
+    const SDK_VERSION = '1.3.0';
 
     private $token;
     private $host;
@@ -56,7 +56,7 @@ class ZanbugClient
                 $context['http_status'] = $this->resolveStatusCode($e);
             }
 
-            $this->send(array(
+            $payload = array(
                 'level'           => $this->resolveLevel($e),
                 'message'         => $this->resolveMessage($e),
                 'occurred_at'     => $this->now(),
@@ -69,7 +69,23 @@ class ZanbugClient
                 'release'         => $this->conf('app.version', null),
                 'server_name'     => gethostname() ? gethostname() : null,
                 'sdk'             => array('name' => self::SDK_NAME, 'version' => self::SDK_VERSION),
-            ));
+            );
+
+            /**
+             * Laravel PHP xəbərdarlıqlarını ErrorException-a çevirib atır, ona
+             * görə bizə "error" kimi gəlir. Əsl səviyyə E_* kodundadır.
+             *
+             * Backend bunu səviyyəyə çevirir (levelFromPhpSeverity), amma biz
+             * göndərmədiyimiz üçün o məntiq indiyə qədər ölü kod idi.
+             */
+            if ($e instanceof \ErrorException) {
+                $severity = $e->getSeverity();
+                if (is_int($severity) && $severity > 0) {
+                    $payload['severity'] = $severity;
+                }
+            }
+
+            $this->send($payload);
         } catch (\Exception $x) {
             // SDK xətası heç vaxt tətbiqi dayandırmamalıdır
         } catch (\Throwable $x) {
