@@ -50,6 +50,21 @@ class Zanbug
     }
 
     /**
+     * Cari istifadəçini əl ilə təyin et — «bu buq neçə nəfəri vurdu» sualı üçün.
+     *
+     * Adətən lazım deyil: auth()->user() avtomatik oxunur.
+     *
+     * @param array|null $user ['id' => .., 'name' => .., 'email' => ..]
+     */
+    public static function setUser($user)
+    {
+        $client = self::client();
+        if ($client !== null) {
+            $client->setUser($user);
+        }
+    }
+
+    /**
      * Konteynerdən klienti alır. Konfiqurasiya söndürülübsə və ya Laravel
      * hələ qalxmayıbsa null qaytarır — çağıran tərəfdə try/catch lazım deyil.
      *

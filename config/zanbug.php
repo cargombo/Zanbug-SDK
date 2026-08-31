@@ -19,6 +19,15 @@ return [
     'enabled' => env('ZANBUG_ENABLED', true),
 
     /*
+     * Xəta baş verəndə hansı istifadəçinin daxil olduğunu da göndər.
+     *
+     * Panelin «neçə istifadəçi vuruldu» sütunu buna əsaslanır. Şəxsi data
+     * (ad, e-poçt) göndərmək istəmirsənsə false et — o zaman heç bir
+     * istifadəçi sahəsi göndərilmir.
+     */
+    'capture_user' => env('ZANBUG_CAPTURE_USER', true),
+
+    /*
      * Slow query həddi (millisaniyə). 0 = söndürülmüş.
      * Default: 500ms
      */

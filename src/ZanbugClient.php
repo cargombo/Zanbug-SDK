@@ -20,7 +20,7 @@ namespace Zanbug\Laravel;
 class ZanbugClient
 {
     const SDK_NAME    = 'zanbug/laravel';
-    const SDK_VERSION = '1.4.0';
+    const SDK_VERSION = '1.5.0';
 
     private $token;
     private $host;
@@ -34,6 +34,9 @@ class ZanbugClient
      * istifadə oluna bilər və yanlış "artıq gördüm" verər.
      */
     private $seen = array();
+
+    /** setUser() ilə əl ilə təyin olunmuş istifadəçi — auth()-dan üstündür. */
+    private $user = null;
 
     public function __construct($token, $host)
     {
@@ -65,6 +68,7 @@ class ZanbugClient
                 'level'           => $this->resolveLevel($e),
                 // Validasiya xətası 422 qaytarır, proqram çökmür — həmişə handled.
                 'handled'         => $this->isValidation($e) ? true : (bool) $handled,
+                'user'            => $this->resolveUser(),
                 'message'         => $this->resolveMessage($e),
                 'occurred_at'     => $this->now(),
                 'exception_class' => get_class($e),
@@ -99,6 +103,98 @@ class ZanbugClient
         }
     }
 
+    /**
+     * Cari istifadəçini əl ilə təyin et.
+     *
+     * Adətən lazım deyil — auth()->user() avtomatik oxunur. Bu metod öz auth
+     * sistemin olanda və ya avtomatik tapılanı əvəzləmək üçündür.
+     *
+     *   Zanbug::setUser(['id' => 42, 'name' => 'Ayan', 'email' => 'a@x.az']);
+     *   Zanbug::setUser(null);  // çıxış
+     */
+    public function setUser($user)
+    {
+        $this->user = is_array($user) ? $this->normalizeUser($user) : null;
+    }
+
+    /**
+     * Göndəriləcək istifadəçi: əvvəlcə əl ilə təyin olunan, sonra auth().
+     *
+     * `zanbug.capture_user` false olsa heç nə göndərilmir — istifadəçi
+     * məlumatı şəxsi datadır və bir açarla tamamilə söndürülə bilməlidir.
+     */
+    private function resolveUser()
+    {
+        if (!$this->conf('zanbug.capture_user', true)) {
+            return null;
+        }
+        if ($this->user !== null) {
+            return $this->user;
+        }
+
+        try {
+            if (function_exists('auth')) {
+                $guard = auth();
+                if (is_object($guard) && method_exists($guard, 'user')) {
+                    $model = $guard->user();
+                    if (is_object($model)) {
+                        return $this->userFromModel($model);
+                    }
+                }
+            }
+        } catch (\Exception $x) {
+        } catch (\Throwable $x) {
+        }
+
+        return null;
+    }
+
+    /** Auth modelindən id/ad/e-poçt çıxarır — sahə adları proyektdən proyektə dəyişir. */
+    private function userFromModel($model)
+    {
+        $id = null;
+        if (method_exists($model, 'getAuthIdentifier')) {
+            $id = $model->getAuthIdentifier();
+        } elseif (isset($model->id)) {
+            $id = $model->id;
+        }
+
+        $name = null;
+        foreach (array('name', 'username', 'full_name', 'fullname', 'first_name') as $key) {
+            if (isset($model->$key) && is_scalar($model->$key)) {
+                $name = $model->$key;
+                break;
+            }
+        }
+
+        $email = isset($model->email) && is_scalar($model->email) ? $model->email : null;
+
+        return $this->normalizeUser(array('id' => $id, 'name' => $name, 'email' => $email));
+    }
+
+    /**
+     * Sahələri baza sütunlarının ölçüsünə kəsir və hamısı boşdursa null verir.
+     *
+     * truncate() işlədilmir: o, kəsilmiş mətnə «…» əlavə edir və dəyəri
+     * varchar limitindən bir simvol yuxarı qaldırır.
+     */
+    private function normalizeUser($user)
+    {
+        $limits = array('id' => 64, 'name' => 128, 'email' => 190);
+        $out    = array();
+
+        foreach ($limits as $key => $max) {
+            if (!isset($user[$key]) || $user[$key] === '') continue;
+            // id rəqəm ola bilər (auto-increment açar) — backend sətir gözləyir.
+            $value = (string) $user[$key];
+            $out[$key] = function_exists('mb_substr')
+                ? mb_substr($value, 0, $max)
+                : substr($value, 0, $max);
+        }
+
+        return $out ? $out : null;
+    }
+
     /** Yalnız Laravel 11+-də çağırılır — Http::globalResponseMiddleware oradan var. */
     public function captureHttpFailure($response)
     {
@@ -126,6 +222,7 @@ class ZanbugClient
                 'level'           => $status >= 500 ? 'error' : 'warning',
                 // Xarici API cavab verdi (pis cavab olsa da) — tətbiq çökmədi.
                 'handled'         => true,
+                'user'            => $this->resolveUser(),
                 'message'         => 'HTTP ' . $status . ': ' . $safeUrl,
                 'occurred_at'     => $this->now(),
                 'exception_class' => 'HttpClientError',
@@ -148,6 +245,7 @@ class ZanbugClient
                 'level'           => 'warning',
                 // Sorğu uğurla bitdi, sadəcə yavaş idi.
                 'handled'         => true,
+                'user'            => $this->resolveUser(),
                 'message'         => sprintf('Slow query (%.0fms): %s', $timeMs, $this->truncate($sql, 300)),
                 'occurred_at'     => $this->now(),
                 'exception_class' => 'SlowQuery',
@@ -306,9 +404,6 @@ class ZanbugClient
                 );
             }
 
-            if (function_exists('auth') && auth()->check()) {
-                $context['user'] = array('id' => auth()->id());
-            }
         } catch (\Exception $x) {
             // Bəzi kontekstlərdə request/auth mövcud olmur — kontekstsiz göndəririk
         } catch (\Throwable $x) {
