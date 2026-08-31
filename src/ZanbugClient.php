@@ -20,7 +20,7 @@ namespace Zanbug\Laravel;
 class ZanbugClient
 {
     const SDK_NAME    = 'zanbug/laravel';
-    const SDK_VERSION = '1.5.0';
+    const SDK_VERSION = '1.6.0';
 
     private $token;
     private $host;
@@ -68,6 +68,7 @@ class ZanbugClient
                 'level'           => $this->resolveLevel($e),
                 // Validasiya xətası 422 qaytarır, proqram çökmür — həmişə handled.
                 'handled'         => $this->isValidation($e) ? true : (bool) $handled,
+                'device'          => $this->deviceInfo(),
                 'user'            => $this->resolveUser(),
                 'message'         => $this->resolveMessage($e),
                 'occurred_at'     => $this->now(),
@@ -195,6 +196,62 @@ class ZanbugClient
         return $out ? $out : null;
     }
 
+    /**
+     * Brauzer / ƏS / runtime.
+     *
+     * browser və os İSTİFADƏÇİNİ təsvir edir, serveri yox — dəyər sorğunun
+     * User-Agent başlığından çıxarılır. Artisan əmrində User-Agent olmur,
+     * orada yalnız runtime qalır. Server maşınını server_name göstərir.
+     */
+    private function deviceInfo()
+    {
+        $device = array('runtime' => 'PHP ' . PHP_VERSION);
+
+        $ua = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+        if ($ua === '') {
+            return $device;
+        }
+
+        /**
+         * Ardıcıllıq VACİBDİR: Edge, Opera və Samsung brauzerlərinin
+         * User-Agent-ində "Chrome" də var, Chrome-unkunda "Safari" də.
+         */
+        $browsers = array(
+            array('Edge',             '~Edg(?:e|A|iOS)?[/ ]([0-9]+)~'),
+            array('Opera',            '~OPR[/ ]([0-9]+)~'),
+            array('Samsung Internet', '~SamsungBrowser[/ ]([0-9]+)~'),
+            array('Firefox',          '~(?:Firefox|FxiOS)[/ ]([0-9]+)~'),
+            array('Chrome',           '~(?:Chrome|CriOS)[/ ]([0-9]+)~'),
+            array('Safari',           '~Version[/ ]([0-9]+).*Safari~'),
+        );
+        foreach ($browsers as $b) {
+            if (preg_match($b[1], $ua, $m)) {
+                $device['browser'] = $b[0] . ' ' . $m[1];
+                break;
+            }
+        }
+
+        // Windows-un User-Agent-i 10.0-da dondurulub — 10 ilə 11 ayrılmır.
+        $systems = array(
+            array('Windows',  '~Windows NT 10~',                     false),
+            array('Windows',  '~Windows NT ([0-9.]+)~',              true),
+            array('Android',  '~Android ([0-9.]+)~',                 true),
+            array('iOS',      '~(?:iPhone|iPad|iPod).*OS ([0-9_]+)~', true),
+            array('macOS',    '~Mac OS X ([0-9_]+)~',                true),
+            array('ChromeOS', '~CrOS~',                              false),
+            array('Linux',    '~Linux|X11~',                         false),
+        );
+        foreach ($systems as $o) {
+            if (!preg_match($o[1], $ua, $m)) continue;
+            $device['os'] = $o[2] && isset($m[1])
+                ? $o[0] . ' ' . str_replace('_', '.', $m[1])
+                : $o[0];
+            break;
+        }
+
+        return $device;
+    }
+
     /** Yalnız Laravel 11+-də çağırılır — Http::globalResponseMiddleware oradan var. */
     public function captureHttpFailure($response)
     {
@@ -222,6 +279,7 @@ class ZanbugClient
                 'level'           => $status >= 500 ? 'error' : 'warning',
                 // Xarici API cavab verdi (pis cavab olsa da) — tətbiq çökmədi.
                 'handled'         => true,
+                'device'          => $this->deviceInfo(),
                 'user'            => $this->resolveUser(),
                 'message'         => 'HTTP ' . $status . ': ' . $safeUrl,
                 'occurred_at'     => $this->now(),
@@ -245,6 +303,7 @@ class ZanbugClient
                 'level'           => 'warning',
                 // Sorğu uğurla bitdi, sadəcə yavaş idi.
                 'handled'         => true,
+                'device'          => $this->deviceInfo(),
                 'user'            => $this->resolveUser(),
                 'message'         => sprintf('Slow query (%.0fms): %s', $timeMs, $this->truncate($sql, 300)),
                 'occurred_at'     => $this->now(),
