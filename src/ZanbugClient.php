@@ -20,7 +20,7 @@ namespace Zanbug\Laravel;
 class ZanbugClient
 {
     const SDK_NAME    = 'zanbug/laravel';
-    const SDK_VERSION = '1.7.0';
+    const SDK_VERSION = '1.8.0';
 
     private $token;
     private $host;
@@ -80,6 +80,8 @@ class ZanbugClient
                 'file'            => $e->getFile(),
                 'line'            => $e->getLine(),
                 'stack'           => $this->buildStackFrames($e),
+                // getTrace() atılma yerini VERMİR — o, yalnız getFile()/getLine()-dədir.
+                'code'            => $this->codeAround($e->getFile(), $e->getLine()),
                 'context'         => $context ? $context : null,
                 'environment'     => $this->conf('app.env', 'production'),
                 'release'         => $this->conf('app.version', null),
@@ -376,6 +378,69 @@ class ZanbugClient
         return $this->crumbs ? $this->crumbs : null;
     }
 
+    // ── Kod konteksti ─────────────────────────────────────────────
+    /**
+     * Xəta sətrinin ətrafındakı kod.
+     *
+     *   RADIUS 5     — 11 sətirlik pəncərə
+     *   MAX_FRAMES 5 — YALNIZ tətbiqin öz freymləri; vendor freymlərinin
+     *                  kodu hadisəni onlarla KB şişirdərdi
+     *   MAX_LINE 240 — generasiya edilmiş faylda bir sətir megabayt ola bilər
+     */
+    const CODE_RADIUS = 5;
+    const CODE_MAX_FRAMES = 5;
+    const CODE_MAX_LINE = 240;
+
+    /**
+     * Faylın sətirləri — sorğu ömrü boyu keşlənir.
+     *
+     * Eyni fayl bir neçə freymdə görünür (controller özünü çağırır, closure
+     * eyni fayldadır) və hər dəfə diskdən oxumaq mənasızdır. Keş sorğu
+     * bitəndə itir, yəni köhnəlmə problemi yoxdur.
+     */
+    private $fileLines = array();
+
+    /** @return array|null sətir nömrəsi => mətn */
+    private function codeAround($file, $line)
+    {
+        $lines = $this->readLines($file);
+        if ($lines === null) return null;
+
+        $total = count($lines);
+        // Kod dəyişib, stack isə köhnə sətri göstərir — uydurmaqdansa susuruq.
+        if ($line < 1 || $line > $total) return null;
+
+        $from = max(1, $line - self::CODE_RADIUS);
+        $to   = min($total, $line + self::CODE_RADIUS);
+
+        $out = array();
+        for ($n = $from; $n <= $to; $n++) {
+            $text = $lines[$n - 1];
+            $out[(string) $n] = function_exists('mb_substr')
+                ? mb_substr($text, 0, self::CODE_MAX_LINE)
+                : substr($text, 0, self::CODE_MAX_LINE);
+        }
+        return $out;
+    }
+
+    /** @return array|null */
+    private function readLines($file)
+    {
+        if (!is_string($file) || $file === '') return null;
+        if (array_key_exists($file, $this->fileLines)) return $this->fileLines[$file];
+
+        $lines = null;
+        // 2 MB-dan böyük fayl oxunmur: belə fayl adətən generasiya edilmiş
+        // olur, oxunaqlı kontekst vermir, amma yaddaşı doldurur.
+        if (@is_readable($file) && @filesize($file) <= 2097152) {
+            $raw = @file($file, FILE_IGNORE_NEW_LINES);
+            if (is_array($raw)) $lines = $raw;
+        }
+
+        $this->fileLines[$file] = $lines;
+        return $lines;
+    }
+
     // ─────────────────────────────────────────────
 
     /** PHP 5.6-da \Throwable yoxdur — orada yalnız \Exception qalır. */
@@ -469,6 +534,7 @@ class ZanbugClient
         $base   = function_exists('base_path') ? base_path() . DIRECTORY_SEPARATOR : null;
         $vendor = DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR;
         $frames = array();
+        $coded  = 0;
 
         foreach ($e->getTrace() as $f) {
             $file = isset($f['file']) ? $f['file'] : null;
@@ -484,6 +550,19 @@ class ZanbugClient
             if (isset($f['function'])) $frame['function'] = $f['function'];
             if (isset($f['class']))    $frame['class']    = $f['class'];
             if ($inApp !== null)       $frame['inApp']    = $inApp;
+
+            /**
+             * Kod YALNIZ tətbiqin öz freymlərinə və yalnız ilk birneçəsinə.
+             * inApp === null (base_path bilinmir) halında da qoşulur: o zaman
+             * bütün stack tətbiqin ola bilər və heç nə göstərməmək daha pisdir.
+             */
+            if ($inApp !== false && $coded < self::CODE_MAX_FRAMES && $file !== null && !empty($frame['line'])) {
+                $code = $this->codeAround($file, $frame['line']);
+                if ($code !== null) {
+                    $frame['code'] = $code;
+                    $coded++;
+                }
+            }
 
             $frames[] = $frame;
         }
