@@ -28,7 +28,24 @@ class Zanbug
     {
         $client = self::client();
         if ($client !== null) {
-            $client->captureException($e);
+            $client->captureException($e, false);
+        }
+    }
+
+    /**
+     * Tutulmuş xətanı göndər — proqram işləməyə davam edib.
+     * Paneldə "handled" kimi işarələnir və "Unhandled" görünüşünə düşmür.
+     *
+     *   try { $api->call(); }
+     *   catch (\Exception $e) { Zanbug::notify($e); }
+     *
+     * @param \Exception|\Throwable $e
+     */
+    public static function notify($e)
+    {
+        $client = self::client();
+        if ($client !== null) {
+            $client->captureException($e, true);
         }
     }
 

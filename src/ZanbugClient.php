@@ -20,7 +20,7 @@ namespace Zanbug\Laravel;
 class ZanbugClient
 {
     const SDK_NAME    = 'zanbug/laravel';
-    const SDK_VERSION = '1.3.0';
+    const SDK_VERSION = '1.4.0';
 
     private $token;
     private $host;
@@ -41,7 +41,12 @@ class ZanbugClient
         $this->host  = rtrim((string) $host, '/');
     }
 
-    public function captureException($e)
+    /**
+     * @param bool $handled Xəta tutuldumu, yoxsa sorğunu çökdürdü?
+     *   Çərçivənin handler-i çağıranda false — sorğu 500 ilə bitir.
+     *   Öz try/catch blokundan çağıranda true (bax: Zanbug::notify()).
+     */
+    public function captureException($e, $handled = false)
     {
         if (!$this->isThrowable($e) || $this->alreadySent($e)) {
             return;
@@ -58,6 +63,8 @@ class ZanbugClient
 
             $payload = array(
                 'level'           => $this->resolveLevel($e),
+                // Validasiya xətası 422 qaytarır, proqram çökmür — həmişə handled.
+                'handled'         => $this->isValidation($e) ? true : (bool) $handled,
                 'message'         => $this->resolveMessage($e),
                 'occurred_at'     => $this->now(),
                 'exception_class' => get_class($e),
@@ -117,6 +124,8 @@ class ZanbugClient
 
             $this->send(array(
                 'level'           => $status >= 500 ? 'error' : 'warning',
+                // Xarici API cavab verdi (pis cavab olsa da) — tətbiq çökmədi.
+                'handled'         => true,
                 'message'         => 'HTTP ' . $status . ': ' . $safeUrl,
                 'occurred_at'     => $this->now(),
                 'exception_class' => 'HttpClientError',
@@ -137,6 +146,8 @@ class ZanbugClient
 
             $this->send(array(
                 'level'           => 'warning',
+                // Sorğu uğurla bitdi, sadəcə yavaş idi.
+                'handled'         => true,
                 'message'         => sprintf('Slow query (%.0fms): %s', $timeMs, $this->truncate($sql, 300)),
                 'occurred_at'     => $this->now(),
                 'exception_class' => 'SlowQuery',

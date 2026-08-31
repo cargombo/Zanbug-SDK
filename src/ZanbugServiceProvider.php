@@ -111,7 +111,8 @@ class ZanbugServiceProvider extends ServiceProvider
                     return false;
                 }
 
-                $app->make('Zanbug\Laravel\ZanbugClient')->captureException($e);
+                // false = sorğu bu xəta ilə çökdü (reportable yalnız o zaman işləyir).
+                $app->make('Zanbug\Laravel\ZanbugClient')->captureException($e, false);
 
                 return false; // false = Laravel öz log-unu davam etdirsin
             });
