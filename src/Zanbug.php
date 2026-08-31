@@ -65,6 +65,23 @@ class Zanbug
     }
 
     /**
+     * İzə bir addım əlavə et — xətadan əvvəl nə baş verdiyini göstərmək üçün.
+     *
+     *   Zanbug::leaveBreadcrumb('Ödəniş başladı', ['order' => 41]);
+     *
+     * @param string     $message
+     * @param array|null $data
+     * @param string     $type
+     */
+    public static function leaveBreadcrumb($message, $data = null, $type = 'manual')
+    {
+        $client = self::client();
+        if ($client !== null) {
+            $client->leaveBreadcrumb($message, $data, $type);
+        }
+    }
+
+    /**
      * Konteynerdən klienti alır. Konfiqurasiya söndürülübsə və ya Laravel
      * hələ qalxmayıbsa null qaytarır — çağıran tərəfdə try/catch lazım deyil.
      *

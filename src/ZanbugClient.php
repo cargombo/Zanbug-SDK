@@ -20,7 +20,7 @@ namespace Zanbug\Laravel;
 class ZanbugClient
 {
     const SDK_NAME    = 'zanbug/laravel';
-    const SDK_VERSION = '1.6.0';
+    const SDK_VERSION = '1.7.0';
 
     private $token;
     private $host;
@@ -37,6 +37,9 @@ class ZanbugClient
 
     /** setUser() ilə əl ilə təyin olunmuş istifadəçi — auth()-dan üstündür. */
     private $user = null;
+
+    /** Xətadan əvvəlki iz — halqa buferi, son 25. */
+    private $crumbs = array();
 
     public function __construct($token, $host)
     {
@@ -68,6 +71,7 @@ class ZanbugClient
                 'level'           => $this->resolveLevel($e),
                 // Validasiya xətası 422 qaytarır, proqram çökmür — həmişə handled.
                 'handled'         => $this->isValidation($e) ? true : (bool) $handled,
+                'breadcrumbs'     => $this->breadcrumbs(),
                 'device'          => $this->deviceInfo(),
                 'user'            => $this->resolveUser(),
                 'message'         => $this->resolveMessage($e),
@@ -279,6 +283,7 @@ class ZanbugClient
                 'level'           => $status >= 500 ? 'error' : 'warning',
                 // Xarici API cavab verdi (pis cavab olsa da) — tətbiq çökmədi.
                 'handled'         => true,
+                'breadcrumbs'     => $this->breadcrumbs(),
                 'device'          => $this->deviceInfo(),
                 'user'            => $this->resolveUser(),
                 'message'         => 'HTTP ' . $status . ': ' . $safeUrl,
@@ -299,10 +304,18 @@ class ZanbugClient
         try {
             $timeMs = (float) $timeMs;
 
+            // Ayrıca issue olmaqdan başqa, sonrakı xətanın izində də görünsün.
+            $this->leaveBreadcrumb(
+                sprintf('Slow query (%.0fms): %s', $timeMs, $this->truncate($sql, 150)),
+                null,
+                'log'
+            );
+
             $this->send(array(
                 'level'           => 'warning',
                 // Sorğu uğurla bitdi, sadəcə yavaş idi.
                 'handled'         => true,
+                'breadcrumbs'     => $this->breadcrumbs(),
                 'device'          => $this->deviceInfo(),
                 'user'            => $this->resolveUser(),
                 'message'         => sprintf('Slow query (%.0fms): %s', $timeMs, $this->truncate($sql, 300)),
@@ -321,6 +334,46 @@ class ZanbugClient
         } catch (\Exception $x) {
         } catch (\Throwable $x) {
         }
+    }
+
+    /**
+     * İzə bir addım əlavə et — xətadan əvvəl nə baş verdiyini göstərmək üçün.
+     *
+     * Halqa buferdir, son 25 saxlanır. Bir sorğu qısa ömürlüdür və bufer
+     * sorğu bitəndə onsuz da itir; hədd əsasən uzun artisan əmrləri üçündür.
+     *
+     * @param string     $message
+     * @param array|null $data
+     * @param string     $type navigation | click | request | console | log |
+     *                         user | state | error | manual
+     */
+    public function leaveBreadcrumb($message, $data = null, $type = 'manual')
+    {
+        if (!$message) return;
+
+        $crumb = array(
+            'at'      => $this->now(),
+            'type'    => $type,
+            // mbstring köhnə serverlərdə həmişə qurulu olmur — paketin
+            // qalan yerlərində də bu yoxlama var.
+            'message' => function_exists('mb_substr')
+                ? mb_substr((string) $message, 0, 255)
+                : substr((string) $message, 0, 255),
+        );
+        if (is_array($data) && $data) {
+            $crumb['data'] = $data;
+        }
+
+        $this->crumbs[] = $crumb;
+        if (count($this->crumbs) > 25) {
+            array_shift($this->crumbs);
+        }
+    }
+
+    /** Payload üçün — boş massiv yerinə null. */
+    private function breadcrumbs()
+    {
+        return $this->crumbs ? $this->crumbs : null;
     }
 
     // ─────────────────────────────────────────────
